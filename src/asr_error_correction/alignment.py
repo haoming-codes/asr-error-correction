@@ -6,6 +6,8 @@ from typing import List, Sequence, Tuple
 
 from lingpy.align import pw_align
 
+from .conversion import GraphemePhoneme
+
 logging.getLogger("lingpy").setLevel(logging.WARNING)
 
 __all__ = [
@@ -23,44 +25,65 @@ def _is_alignment_marker(token: str) -> bool:
     return stripped in {"", "-", "‖"}
 
 
-def _extract_matched_subsequence(
+def _extract_matched_span(
     sentence_tokens: Sequence[str], query_tokens: Sequence[str]
-) -> str:
-    """Return the subsequence from ``sentence_tokens`` aligned with ``query_tokens``."""
+) -> Tuple[str, int, int] | None:
+    """Return the subsequence and bounds from ``sentence_tokens``."""
 
     matched: List[str] = []
+    start_index: int | None = None
+    sentence_index = 0
+
     for sentence_token, query_token in zip(sentence_tokens, query_tokens):
-        if _is_alignment_marker(query_token) or _is_alignment_marker(sentence_token):
+        if _is_alignment_marker(sentence_token):
             continue
-        matched.append(sentence_token)
-    return "".join(matched)
+
+        if not _is_alignment_marker(query_token):
+            if start_index is None:
+                start_index = sentence_index
+            matched.append(sentence_token)
+
+        sentence_index += len(sentence_token)
+
+    if not matched or start_index is None:
+        return None
+
+    matched_str = "".join(matched)
+    end_index = start_index + len(matched_str)
+    return matched_str, start_index, end_index
 
 
 class LocalAlignment:
     """Local alignment between a sentence IPA string and a query IPA string."""
 
-    def align(self, sentence_ipa: str, query_ipa: str) -> List[Tuple[float, str]]:
-        """Align ``sentence_ipa`` against ``query_ipa`` using ``lingpy``."""
+    def align(
+        self, sentence: GraphemePhoneme, query: GraphemePhoneme
+    ) -> List[Tuple[float, GraphemePhoneme]]:
+        """Align ``sentence`` against ``query`` using ``lingpy``."""
 
-        alignment = pw_align(sentence_ipa, query_ipa, mode="overlap")
+        alignment = pw_align(sentence.phoneme_str, query.phoneme_str, mode="overlap")
         if not alignment:
             return []
         sentence_tokens, query_tokens, score = alignment
-        matched = _extract_matched_subsequence(sentence_tokens, query_tokens)
-        if not matched:
+        span = _extract_matched_span(sentence_tokens, query_tokens)
+        if not span:
+            return []
+        _, start, end = span
+        matched = sentence.subsequence_covering_span(start, end)
+        if matched is None:
             return []
         return [(score, matched)]
 
 
 def local_align_sentence(
-    sentence_ipa: str,
-    query_ipas: Sequence[str],
+    sentence: GraphemePhoneme,
+    query_graphemes: Sequence[GraphemePhoneme],
     aligner: LocalAlignment | None = None,
-) -> List[Tuple[str, List[Tuple[float, str]]]]:
-    """Align ``sentence_ipa`` against each query in ``query_ipas``."""
+) -> List[Tuple[GraphemePhoneme, List[Tuple[float, GraphemePhoneme]]]]:
+    """Align ``sentence`` against each query in ``query_graphemes``."""
 
     local_aligner = aligner or LocalAlignment()
-    results: List[Tuple[str, List[Tuple[float, str]]]] = []
-    for query in query_ipas:
-        results.append((query, local_aligner.align(sentence_ipa, query)))
+    results: List[Tuple[GraphemePhoneme, List[Tuple[float, GraphemePhoneme]]]] = []
+    for query in query_graphemes:
+        results.append((query, local_aligner.align(sentence, query)))
     return results
