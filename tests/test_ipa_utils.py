@@ -10,7 +10,13 @@ if str(SRC_ROOT) not in sys.path:
 
 import pytest
 
-from asr_error_correction import IPAConverter, IPALexicon, LocalAlignment, local_align_sentence
+from asr_error_correction import (
+    GraphemePhoneme,
+    IPAConverter,
+    IPALexicon,
+    LocalAlignment,
+    local_align_sentence,
+)
 import asr_error_correction.conversion as conversion
 import asr_error_correction.alignment as alignment
 
@@ -62,10 +68,8 @@ def test_ipalexicon_save_and_load_roundtrip(tmp_path: Path):
     loaded = IPALexicon(converter)
     loaded.load_from(output_file)
 
-    assert loaded.entries == {
-        "Hello": "en(Hello)",
-        "世界": "zh(世界)",
-    }
+    assert loaded.entries["Hello"].phonemes == "en(Hello)"
+    assert loaded.entries["世界"].phonemes == "zh(世界)"
 
 
 def test_local_alignment_with_lingpy(monkeypatch):
@@ -75,12 +79,16 @@ def test_local_alignment_with_lingpy(monkeypatch):
     monkeypatch.setattr(alignment, "we_align", fake_we_align)
 
     aligner = LocalAlignment(method="lingpy")
-    result = aligner.align("sentence", "query")
+    sentence_gp = GraphemePhoneme("sentence", phonemes="sentence-ipa")
+    query_gp = GraphemePhoneme("query", phonemes="query-ipa")
+    result = aligner.align(sentence_gp, query_gp)
 
     assert result.score == pytest.approx(0.75)
     assert result.sentence_alignment == "s-e"
     assert result.query_alignment == "se"
     assert result.sentence_subsequence == "se"
+    assert result.sentence_graphemes == "sentence"
+    assert result.query_graphemes == "query"
 
 
 def test_local_align_sentence_uses_aligner(monkeypatch):
@@ -93,7 +101,13 @@ def test_local_align_sentence_uses_aligner(monkeypatch):
             return f"aligned-{query}"
 
     aligner = DummyAligner()
-    results = local_align_sentence("sentence", ["one", "two"], aligner)
+    sentence_gp = GraphemePhoneme("sentence", phonemes="sentence-ipa")
+    query_one = GraphemePhoneme("one", phonemes="one-ipa")
+    query_two = GraphemePhoneme("two", phonemes="two-ipa")
+    results = local_align_sentence(sentence_gp, [query_one, query_two], aligner)
 
-    assert aligner.calls == [("sentence", "one"), ("sentence", "two")]
-    assert results == [("one", "aligned-one"), ("two", "aligned-two")]
+    assert aligner.calls == [(sentence_gp, query_one), (sentence_gp, query_two)]
+    assert results == [
+        (query_one, "aligned-" + str(query_one)),
+        (query_two, "aligned-" + str(query_two)),
+    ]

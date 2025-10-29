@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 from .alignment import AlignmentResult, LocalAlignment, local_align_sentence
-from .conversion import IPAConverter, TokenizedSegment
+from .conversion import GraphemePhoneme, IPAConverter, TokenizedSegment
 from .lexicon import IPALexicon
 
 __all__ = [
     "AlignmentResult",
+    "GraphemePhoneme",
     "IPAConverter",
     "IPALexicon",
     "LocalAlignment",

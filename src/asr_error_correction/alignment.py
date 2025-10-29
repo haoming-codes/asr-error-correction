@@ -8,6 +8,7 @@ from typing import List, Optional, Sequence, Tuple
 from abydos.distance import ALINE
 from lingpy.align import we_align
 
+from .conversion import GraphemePhoneme
 logging.getLogger("lingpy").setLevel(logging.WARNING)
 
 __all__ = [
@@ -25,6 +26,20 @@ class AlignmentResult:
     sentence_subsequence: str
     sentence_alignment: str
     query_alignment: str
+    sentence: GraphemePhoneme
+    query: GraphemePhoneme
+
+    @property
+    def sentence_graphemes(self) -> str:
+        """Return the grapheme form of the aligned sentence."""
+
+        return self.sentence.graphemes
+
+    @property
+    def query_graphemes(self) -> str:
+        """Return the grapheme form of the aligned query."""
+
+        return self.query.graphemes
 
 
 class LocalAlignment:
@@ -36,14 +51,20 @@ class LocalAlignment:
         self.method = method
         self.aline = aline or (ALINE(mode="local") if method == "aline" else None)
 
-    def align(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
+    def align(
+        self, sentence: GraphemePhoneme, query: GraphemePhoneme
+    ) -> AlignmentResult:
         if self.method == "lingpy":
-            return self._align_with_lingpy(sentence_ipa, query_ipa)
-        return self._align_with_aline(sentence_ipa, query_ipa)
+            return self._align_with_lingpy(sentence, query)
+        return self._align_with_aline(sentence, query)
 
     @staticmethod
     def _build_alignment_result(
-        score: float, sentence_tokens: Sequence[str], query_tokens: Sequence[str]
+        score: float,
+        sentence_tokens: Sequence[str],
+        query_tokens: Sequence[str],
+        sentence: GraphemePhoneme,
+        query: GraphemePhoneme,
     ) -> AlignmentResult:
         sentence_alignment = "".join(sentence_tokens)
         query_alignment = "".join(query_tokens)
@@ -53,20 +74,28 @@ class LocalAlignment:
             sentence_subsequence=sentence_subsequence,
             sentence_alignment=sentence_alignment,
             query_alignment=query_alignment,
+            sentence=sentence,
+            query=query,
         )
 
-    def _align_with_lingpy(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
-        alignments = we_align(sentence_ipa, query_ipa)
+    def _align_with_lingpy(
+        self, sentence: GraphemePhoneme, query: GraphemePhoneme
+    ) -> AlignmentResult:
+        alignments = we_align(sentence.phonemes, query.phonemes)
         if not alignments:
-            return AlignmentResult(0.0, "", "", "")
+            return AlignmentResult(0.0, "", "", "", sentence, query)
         sentence_tokens, query_tokens, score = alignments[0]
-        return self._build_alignment_result(score, sentence_tokens, query_tokens)
+        return self._build_alignment_result(
+            score, sentence_tokens, query_tokens, sentence, query
+        )
 
-    def _align_with_aline(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
+    def _align_with_aline(
+        self, sentence: GraphemePhoneme, query: GraphemePhoneme
+    ) -> AlignmentResult:
         if self.aline is None:
             raise RuntimeError("ALINE aligner not initialized")
         score, sentence_alignment, query_alignment = self.aline.alignment(
-            sentence_ipa, query_ipa
+            sentence.phonemes, query.phonemes
         )
         subsequence = self._extract_subsequence(sentence_alignment)
         return AlignmentResult(
@@ -74,6 +103,8 @@ class LocalAlignment:
             sentence_subsequence=subsequence,
             sentence_alignment=sentence_alignment,
             query_alignment=query_alignment,
+            sentence=sentence,
+            query=query,
         )
 
     @staticmethod
@@ -90,14 +121,14 @@ class LocalAlignment:
 
 
 def local_align_sentence(
-    sentence_ipa: str,
-    query_ipas: Sequence[str],
+    sentence: GraphemePhoneme,
+    query_items: Sequence[GraphemePhoneme],
     aligner: Optional[LocalAlignment] = None,
-) -> List[Tuple[str, AlignmentResult]]:
-    """Align ``sentence_ipa`` against each query in ``query_ipas``."""
+) -> List[Tuple[GraphemePhoneme, AlignmentResult]]:
+    """Align ``sentence`` against each query in ``query_items``."""
 
     local_aligner = aligner or LocalAlignment()
-    results: List[Tuple[str, AlignmentResult]] = []
-    for query in query_ipas:
-        results.append((query, local_aligner.align(sentence_ipa, query)))
+    results: List[Tuple[GraphemePhoneme, AlignmentResult]] = []
+    for query in query_items:
+        results.append((query, local_aligner.align(sentence, query)))
     return results

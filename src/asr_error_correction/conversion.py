@@ -4,13 +4,13 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from dragonmapper.hanzi import to_ipa as hanzi_to_ipa
 from eng_to_ipa import convert as eng_to_ipa_convert
 
 
-__all__ = ["IPAConverter", "TokenizedSegment"]
+__all__ = ["GraphemePhoneme", "IPAConverter", "TokenizedSegment"]
 
 
 _CHINESE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+")
@@ -118,3 +118,47 @@ class IPAConverter:
         return "".join(
             ch for ch in value if not unicodedata.category(ch).startswith("P")
         )
+
+
+@dataclass(frozen=True)
+class GraphemePhoneme:
+    """Representation of a sentence in both grapheme and phoneme form."""
+
+    graphemes: str
+    _phonemes: str
+
+    def __init__(
+        self,
+        graphemes: str,
+        *,
+        converter: Optional[IPAConverter] = None,
+        phonemes: Optional[str] = None,
+    ) -> None:
+        object.__setattr__(self, "graphemes", graphemes)
+        if phonemes is None:
+            ipa_converter = converter or IPAConverter()
+            phonemes = ipa_converter.convert(graphemes)
+        object.__setattr__(self, "_phonemes", phonemes)
+
+    @property
+    def phonemes(self) -> str:
+        """Return the IPA phoneme representation for this sentence."""
+
+        return self._phonemes
+
+    def to_mapping(self) -> Tuple[str, str]:
+        """Return a tuple of grapheme and phoneme representations."""
+
+        return self.graphemes, self._phonemes
+
+    @classmethod
+    def from_mapping(
+        cls,
+        graphemes: str,
+        phonemes: str,
+        *,
+        converter: Optional[IPAConverter] = None,
+    ) -> GraphemePhoneme:
+        """Rebuild an instance from previously persisted data."""
+
+        return cls(graphemes, converter=converter, phonemes=phonemes)
