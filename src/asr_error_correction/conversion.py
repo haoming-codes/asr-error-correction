@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Iterable, List, Tuple
 
@@ -47,10 +48,12 @@ class IPAConverter:
         remove_tone_marks: bool = False,
         remove_stress_marks: bool = False,
         strip_whitespace: bool = False,
+        remove_punctuation: bool = False,
     ) -> None:
         self.remove_tone_marks = remove_tone_marks
         self.remove_stress_marks = remove_stress_marks
         self.strip_whitespace = strip_whitespace
+        self.remove_punctuation = remove_punctuation
 
     def tokenize(self, text: str) -> Iterable[TokenizedSegment]:
         """Yield the detected segments from ``text``."""
@@ -64,7 +67,13 @@ class IPAConverter:
 
         converted: List[Tuple[str, bool]] = []
         for token in self.tokenize(text):
-            converted.append((self._convert_segment(token), token.is_alpha or token.is_chinese))
+            value = self._convert_segment(token)
+            is_ipa_segment = token.is_alpha or token.is_chinese
+            if self.remove_punctuation and not is_ipa_segment:
+                value = self._remove_punctuation(value)
+                if not value:
+                    continue
+            converted.append((value, is_ipa_segment))
 
         processed: List[str] = []
         for value, is_ipa_segment in converted:
@@ -103,3 +112,9 @@ class IPAConverter:
         if self.remove_tone_marks:
             value = value.translate(_TONE_TRANSLATION)
         return value
+
+    @staticmethod
+    def _remove_punctuation(value: str) -> str:
+        return "".join(
+            ch for ch in value if not unicodedata.category(ch).startswith("P")
+        )

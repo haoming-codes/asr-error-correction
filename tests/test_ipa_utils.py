@@ -43,6 +43,14 @@ def test_ipa_converter_can_strip_markers(monkeypatch):
     assert result == "ɛnoʊpʰinin!"
 
 
+def test_ipa_converter_can_remove_punctuation():
+    converter = IPAConverter(remove_punctuation=True)
+
+    text = "Hello， 世界！ NASA?"
+
+    assert converter.convert(text) == "en(Hello) zh(世界) en(N) en(A) en(S) en(A)"
+
+
 def test_ipalexicon_save_and_load_roundtrip(tmp_path: Path):
     converter = IPAConverter()
     lexicon = IPALexicon(converter)
