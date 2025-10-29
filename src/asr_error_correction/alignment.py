@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 from abydos.distance import ALINE
+from lingpy import log
+log.setLevel(logging.WARNING)
 from lingpy.align import we_align
 
-logging.getLogger("lingpy").setLevel(logging.WARNING)
+# logging.getLogger("lingpy").setLevel(logging.WARNING)
 
 __all__ = [
     "AlignmentResult",
