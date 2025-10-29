@@ -1,0 +1,8 @@
+pypinyin
+panphon
+lingpy
+eng_to_ipa
+dragonmapper
+sktime
+openai
+abydos @ git+https://github.com/denizberkin/abydos.git
