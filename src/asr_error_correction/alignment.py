@@ -58,7 +58,7 @@ class LocalAlignment:
 
     def align(
         self, sentence: GraphemePhoneme, query: GraphemePhoneme
-    ) -> List[Tuple[float, GraphemePhoneme]]:
+    ) -> List[Tuple[float, int, int, GraphemePhoneme]]:
         """Align ``sentence`` against ``query`` using ``lingpy``."""
 
         alignment = pw_align(sentence.phoneme_str, query.phoneme_str, mode="overlap")
@@ -68,22 +68,38 @@ class LocalAlignment:
         span = _extract_matched_span(sentence_tokens, query_tokens)
         if not span:
             return []
-        _, start, end = span
-        matched = sentence.subsequence_covering_span(start, end)
+        _, phoneme_start, phoneme_end = span
+
+        indices = [
+            idx
+            for idx, (token_start, token_end) in enumerate(sentence.phoneme_spans)
+            if token_end > phoneme_start and token_start < phoneme_end
+        ]
+        if not indices:
+            return []
+        first_idx, last_idx = indices[0], indices[-1]
+        grapheme_start, _ = sentence.grapheme_spans[first_idx]
+        _, grapheme_end = sentence.grapheme_spans[last_idx]
+
+        matched = sentence.subsequence_covering_span(phoneme_start, phoneme_end)
         if matched is None:
             return []
-        return [(score, matched)]
+        return [(score, grapheme_start, grapheme_end, matched)]
 
 
 def local_align_sentence(
     sentence: GraphemePhoneme,
     query_graphemes: Sequence[GraphemePhoneme],
     aligner: LocalAlignment | None = None,
-) -> List[Tuple[GraphemePhoneme, List[Tuple[float, GraphemePhoneme]]]]:
+) -> List[
+    Tuple[GraphemePhoneme, List[Tuple[float, int, int, GraphemePhoneme]]]
+]:
     """Align ``sentence`` against each query in ``query_graphemes``."""
 
     local_aligner = aligner or LocalAlignment()
-    results: List[Tuple[GraphemePhoneme, List[Tuple[float, GraphemePhoneme]]]] = []
+    results: List[
+        Tuple[GraphemePhoneme, List[Tuple[float, int, int, GraphemePhoneme]]]
+    ] = []
     for query in query_graphemes:
         results.append((query, local_aligner.align(sentence, query)))
     return results

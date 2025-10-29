@@ -11,6 +11,7 @@ if str(SRC_ROOT) not in sys.path:
 import pytest
 
 from asr_error_correction import (
+    ASRCorrector,
     GraphemePhoneme,
     IPAConverter,
     IPALexicon,
@@ -120,7 +121,9 @@ def test_local_alignment_with_lingpy(monkeypatch):
     result = aligner.align(sentence, query)
 
     assert result[0][0] == pytest.approx(0.75)
-    matched_gp = result[0][1]
+    assert result[0][1] == 1
+    assert result[0][2] == 8
+    matched_gp = result[0][3]
     assert matched_gp.grapheme_list == ("好", "hello")
     assert matched_gp.phoneme_list == ("xɑʊ", "hɛloʊ")
     assert matched_gp.grapheme_str == "好 hello"
@@ -142,16 +145,103 @@ def test_local_align_sentence_uses_aligner(monkeypatch):
 
         def align(self, sentence, query):
             self.calls.append((sentence, query))
-            return [(1.0, query)]
+            return [(1.0, 0, len(query.grapheme_str), query)]
 
     aligner = DummyAligner()
     results = local_align_sentence(sentence, [query_one, query_two], aligner)
 
     assert aligner.calls == [(sentence, query_one), (sentence, query_two)]
     assert results == [
-        (query_one, [(1.0, query_one)]),
-        (query_two, [(1.0, query_two)]),
+        (query_one, [(1.0, 0, len(query_one.grapheme_str), query_one)]),
+        (query_two, [(1.0, 0, len(query_two.grapheme_str), query_two)]),
     ]
+
+
+def _build_sentence_gp() -> GraphemePhoneme:
+    return GraphemePhoneme.from_components(
+        "你好 hello world",
+        ["你", "好", "hello", "world"],
+        "nixɑʊhɛloʊwərld",
+        ["ni", "xɑʊ", "hɛloʊ", "wərld"],
+    )
+
+
+def test_asr_corrector_replaces_highest_scoring_match(monkeypatch):
+    sentence_gp = _build_sentence_gp()
+
+    match = sentence_gp.subsequence_covering_span(2, 10)
+    assert match is not None
+
+    replacement_entry = GraphemePhoneme.from_components(
+        "号halo",
+        ["号", "halo"],
+        "xɑhalo",
+        ["xɑ", "halo"],
+    )
+
+    lower_entry = GraphemePhoneme.from_components(
+        "你好",
+        ["你", "好"],
+        "nixɑʊ",
+        ["ni", "xɑʊ"],
+    )
+
+    class DummyConverter:
+        def convert_to_grapheme_phoneme(self, text: str) -> GraphemePhoneme:
+            assert text == "你好 hello world"
+            return sentence_gp
+
+    class DummyAligner:
+        def align(self, sentence, query):
+            if query is replacement_entry:
+                return [(0.9, 1, 8, match)]
+            if query is lower_entry:
+                lower_match = sentence.subsequence_covering_span(0, 2)
+                assert lower_match is not None
+                return [(0.5, 0, 2, lower_match)]
+            return []
+
+    lexicon = IPALexicon()
+    lexicon.converter = DummyConverter()
+    lexicon.entries = {
+        "号halo": replacement_entry,
+        "你好": lower_entry,
+    }
+
+    corrector = ASRCorrector(lexicon, aligner=DummyAligner(), score_threshold=0.4)
+
+    corrected = corrector.correct("你好 hello world")
+
+    assert corrected == "你号halo world"
+
+
+def test_asr_corrector_respects_score_threshold(monkeypatch):
+    sentence_gp = _build_sentence_gp()
+
+    class DummyConverter:
+        def convert_to_grapheme_phoneme(self, text: str) -> GraphemePhoneme:
+            return sentence_gp
+
+    class DummyAligner:
+        def align(self, sentence, query):
+            match = sentence.subsequence_covering_span(2, 10)
+            assert match is not None
+            return [(0.3, 1, 8, match)]
+
+    lexicon = IPALexicon()
+    lexicon.converter = DummyConverter()
+    lexicon.entries = {
+        "号halo": GraphemePhoneme.from_components(
+            "号halo",
+            ["号", "halo"],
+            "xɑhalo",
+            ["xɑ", "halo"],
+        )
+    }
+
+    corrector = ASRCorrector(lexicon, aligner=DummyAligner(), score_threshold=0.5)
+
+    assert corrector.correct("你好 hello world") == "你好 hello world"
 
 
 def test_local_alignment_filters_marker_only_matches(monkeypatch):
