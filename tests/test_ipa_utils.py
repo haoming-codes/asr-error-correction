@@ -69,18 +69,54 @@ def test_ipalexicon_save_and_load_roundtrip(tmp_path: Path):
 
 
 def test_local_alignment_with_lingpy(monkeypatch):
-    def fake_we_align(sentence, query):
-        return [(["s", "-", "e"], ["s", "e"], 0.75)]
+    def fake_pw_align(sentence, query, mode):
+        assert mode == "overlap"
+        return (["s", "-", "‖", " ", "e"], ["s", " ", "e"], 0.75)
 
-    monkeypatch.setattr(alignment, "we_align", fake_we_align)
+    monkeypatch.setattr(alignment, "pw_align", fake_pw_align)
 
     aligner = LocalAlignment(method="lingpy")
     result = aligner.align("sentence", "query")
 
     assert result.score == pytest.approx(0.75)
-    assert result.sentence_alignment == "s-e"
-    assert result.query_alignment == "se"
+    assert result.sentence_alignment == "s-‖ e"
+    assert result.query_alignment == "s e"
     assert result.sentence_subsequence == "se"
+
+
+def test_local_alignment_with_aline_removes_markers(monkeypatch):
+    class FakeAline:
+        def __init__(self, mode):
+            self.mode = mode
+
+        def alignment(self, sentence, query):
+            return (0.5, "s-‖ e", "q- e")
+
+    fake_aline = FakeAline(mode="semi-global")
+
+    aligner = LocalAlignment(method="aline", aline=fake_aline)
+    result = aligner.align("sentence", "query")
+
+    assert result.score == pytest.approx(0.5)
+    assert result.sentence_alignment == "s-‖ e"
+    assert result.query_alignment == "q- e"
+    assert result.sentence_subsequence == "se"
+
+
+def test_local_alignment_with_default_aline_uses_semi_global(monkeypatch):
+    class FakeAline:
+        def __init__(self, mode):
+            self.mode = mode
+
+        def alignment(self, sentence, query):
+            return (0.0, "", "")
+
+    monkeypatch.setattr(alignment, "ALINE", FakeAline)
+
+    aligner = LocalAlignment(method="aline")
+
+    assert isinstance(aligner.aline, FakeAline)
+    assert aligner.aline.mode == "semi-global"
 
 
 def test_local_align_sentence_uses_aligner(monkeypatch):

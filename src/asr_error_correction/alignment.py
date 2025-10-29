@@ -7,8 +7,10 @@ from typing import List, Optional, Sequence, Tuple
 
 from abydos.distance import ALINE
 from lingpy import log
-log.setLevel(logging.WARNING)
-from lingpy.align import we_align
+
+if hasattr(log, "setLevel"):
+    log.setLevel(logging.WARNING)
+from lingpy.align import pw_align
 
 # logging.getLogger("lingpy").setLevel(logging.WARNING)
 
@@ -36,7 +38,7 @@ class LocalAlignment:
         if method not in {"lingpy", "aline"}:
             raise ValueError("method must be 'lingpy' or 'aline'")
         self.method = method
-        self.aline = aline or (ALINE(mode="local") if method == "aline" else None)
+        self.aline = aline or (ALINE(mode="semi-global") if method == "aline" else None)
 
     def align(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
         if self.method == "lingpy":
@@ -44,12 +46,17 @@ class LocalAlignment:
         return self._align_with_aline(sentence_ipa, query_ipa)
 
     @staticmethod
+    def _strip_alignment_markers(text: str) -> str:
+        markers = {"-", "‖", " "}
+        return "".join(ch for ch in text if ch not in markers)
+
+    @staticmethod
     def _build_alignment_result(
         score: float, sentence_tokens: Sequence[str], query_tokens: Sequence[str]
     ) -> AlignmentResult:
         sentence_alignment = "".join(sentence_tokens)
         query_alignment = "".join(query_tokens)
-        sentence_subsequence = sentence_alignment.replace("-", "")
+        sentence_subsequence = LocalAlignment._strip_alignment_markers(sentence_alignment)
         return AlignmentResult(
             score=score,
             sentence_subsequence=sentence_subsequence,
@@ -58,10 +65,10 @@ class LocalAlignment:
         )
 
     def _align_with_lingpy(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
-        alignments = we_align(sentence_ipa, query_ipa)
-        if not alignments:
+        alignment = pw_align(sentence_ipa, query_ipa, mode="overlap")
+        if not alignment:
             return AlignmentResult(0.0, "", "", "")
-        sentence_tokens, query_tokens, score = alignments[0]
+        sentence_tokens, query_tokens, score = alignment
         return self._build_alignment_result(score, sentence_tokens, query_tokens)
 
     def _align_with_aline(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
@@ -88,7 +95,7 @@ class LocalAlignment:
                 segment = alignment
         else:
             segment = alignment
-        return "".join(segment.split())
+        return LocalAlignment._strip_alignment_markers(segment)
 
 
 def local_align_sentence(
