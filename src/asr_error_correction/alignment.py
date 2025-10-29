@@ -1,11 +1,14 @@
 """Local alignment helpers for IPA strings."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 from abydos.distance import ALINE
 from lingpy.align import we_align
+
+logging.getLogger("lingpy").setLevel(logging.WARNING)
 
 __all__ = [
     "AlignmentResult",
