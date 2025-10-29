@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 from abydos.distance import ALINE
-from lingpy import log
-log.setLevel(logging.WARNING)
-from lingpy.align import we_align
+from lingpy.align import pw_align
+
+logging.getLogger("lingpy").setLevel(logging.WARNING)
 
 # logging.getLogger("lingpy").setLevel(logging.WARNING)
 
@@ -36,7 +36,7 @@ class LocalAlignment:
         if method not in {"lingpy", "aline"}:
             raise ValueError("method must be 'lingpy' or 'aline'")
         self.method = method
-        self.aline = aline or (ALINE(mode="local") if method == "aline" else None)
+        self.aline = aline or (ALINE(mode="semi-global") if method == "aline" else None)
 
     def align(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
         if self.method == "lingpy":
@@ -44,12 +44,18 @@ class LocalAlignment:
         return self._align_with_aline(sentence_ipa, query_ipa)
 
     @staticmethod
+    def _clean_alignment_text(text: str) -> str:
+        for marker in ("-", "‖", " "):
+            text = text.replace(marker, "")
+        return text
+
+    @staticmethod
     def _build_alignment_result(
         score: float, sentence_tokens: Sequence[str], query_tokens: Sequence[str]
     ) -> AlignmentResult:
         sentence_alignment = "".join(sentence_tokens)
         query_alignment = "".join(query_tokens)
-        sentence_subsequence = sentence_alignment.replace("-", "")
+        sentence_subsequence = LocalAlignment._clean_alignment_text(sentence_alignment)
         return AlignmentResult(
             score=score,
             sentence_subsequence=sentence_subsequence,
@@ -58,10 +64,10 @@ class LocalAlignment:
         )
 
     def _align_with_lingpy(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
-        alignments = we_align(sentence_ipa, query_ipa)
-        if not alignments:
+        alignment = pw_align(sentence_ipa, query_ipa, mode="overlap")
+        if not alignment:
             return AlignmentResult(0.0, "", "", "")
-        sentence_tokens, query_tokens, score = alignments[0]
+        sentence_tokens, query_tokens, score = alignment
         return self._build_alignment_result(score, sentence_tokens, query_tokens)
 
     def _align_with_aline(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
@@ -70,25 +76,13 @@ class LocalAlignment:
         score, sentence_alignment, query_alignment = self.aline.alignment(
             sentence_ipa, query_ipa
         )
-        subsequence = self._extract_subsequence(sentence_alignment)
+        subsequence = self._clean_alignment_text(sentence_alignment)
         return AlignmentResult(
             score=score,
             sentence_subsequence=subsequence,
             sentence_alignment=sentence_alignment,
             query_alignment=query_alignment,
         )
-
-    @staticmethod
-    def _extract_subsequence(alignment: str) -> str:
-        if "‖" in alignment:
-            parts = alignment.split("‖")
-            if len(parts) >= 3:
-                segment = parts[1]
-            else:
-                segment = alignment
-        else:
-            segment = alignment
-        return "".join(segment.split())
 
 
 def local_align_sentence(
