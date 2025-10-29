@@ -30,6 +30,19 @@ def test_ipa_converter_handles_mixed_languages():
     assert converter.convert(text) == expected
 
 
+def test_ipa_converter_can_strip_markers(monkeypatch):
+    monkeypatch.setattr(conversion, "eng_to_ipa_convert", lambda token: "ˈɛn ˌoʊ1")
+    monkeypatch.setattr(conversion, "hanzi_to_ipa", lambda text: "pʰin1˥ ˈin2")
+
+    converter = IPAConverter(
+        remove_tone_marks=True, remove_stress_marks=True, strip_whitespace=True
+    )
+
+    result = converter.convert("Hello 世界 !")
+
+    assert result == "ɛnoʊpʰinin!"
+
+
 def test_ipalexicon_save_and_load_roundtrip(tmp_path: Path):
     converter = IPAConverter()
     lexicon = IPALexicon(converter)

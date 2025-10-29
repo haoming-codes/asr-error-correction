@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 
 from dragonmapper.hanzi import to_ipa as hanzi_to_ipa
 from eng_to_ipa import convert as eng_to_ipa_convert
@@ -33,8 +33,24 @@ class TokenizedSegment:
         return self.raw.isalpha()
 
 
+_STRESS_TRANSLATION = str.maketrans("", "", "ˈˌ")
+_TONE_TRANSLATION = str.maketrans("", "", "012345˥˦˧˨˩˩˨˧˦˥")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
 class IPAConverter:
     """Convert English and Chinese text to their IPA representations."""
+
+    def __init__(
+        self,
+        *,
+        remove_tone_marks: bool = False,
+        remove_stress_marks: bool = False,
+        strip_whitespace: bool = False,
+    ) -> None:
+        self.remove_tone_marks = remove_tone_marks
+        self.remove_stress_marks = remove_stress_marks
+        self.strip_whitespace = strip_whitespace
 
     def tokenize(self, text: str) -> Iterable[TokenizedSegment]:
         """Yield the detected segments from ``text``."""
@@ -46,10 +62,20 @@ class IPAConverter:
         if not text:
             return ""
 
-        converted: List[str] = []
+        converted: List[Tuple[str, bool]] = []
         for token in self.tokenize(text):
-            converted.append(self._convert_segment(token))
-        return "".join(converted)
+            converted.append((self._convert_segment(token), token.is_alpha or token.is_chinese))
+
+        processed: List[str] = []
+        for value, is_ipa_segment in converted:
+            if is_ipa_segment:
+                value = self._apply_marker_options(value)
+            processed.append(value)
+
+        result = "".join(processed)
+        if self.strip_whitespace:
+            result = _WHITESPACE_RE.sub("", result)
+        return result
 
     @staticmethod
     def _convert_segment(segment: TokenizedSegment) -> str:
@@ -70,3 +96,10 @@ class IPAConverter:
             letters = [letter for letter in letters if letter]
             return " ".join(letters)
         return eng_to_ipa_convert(token)
+
+    def _apply_marker_options(self, value: str) -> str:
+        if self.remove_stress_marks:
+            value = value.translate(_STRESS_TRANSLATION)
+        if self.remove_tone_marks:
+            value = value.translate(_TONE_TRANSLATION)
+        return value
