@@ -13,8 +13,8 @@ setup(
     long_description_content_type="text/markdown",
     url="https://example.com/asr-error-correction",
     author="",
-    packages=find_packages(exclude=("tests",)),
-    py_modules=["ipa_utils"],
+    package_dir={"": "src"},
+    packages=find_packages(where="src"),
     install_requires=[
         "pypinyin",
         "panphon",
