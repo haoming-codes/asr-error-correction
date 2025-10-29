@@ -2,104 +2,65 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
-from abydos.distance import ALINE
-from lingpy import log
-log.setLevel(logging.WARNING)
-from lingpy.align import we_align
+from lingpy.align import pw_align
 
-# logging.getLogger("lingpy").setLevel(logging.WARNING)
+logging.getLogger("lingpy").setLevel(logging.WARNING)
 
 __all__ = [
-    "AlignmentResult",
     "LocalAlignment",
     "local_align_sentence",
 ]
 
 
-@dataclass
-class AlignmentResult:
-    """Result container for a local alignment operation."""
+def _is_alignment_marker(token: str) -> bool:
+    """Return ``True`` if *token* represents an insertion/deletion marker."""
 
-    score: float
-    sentence_subsequence: str
-    sentence_alignment: str
-    query_alignment: str
+    if not token:
+        return True
+    stripped = token.strip()
+    return stripped in {"", "-", "‖"}
+
+
+def _extract_matched_subsequence(
+    sentence_tokens: Sequence[str], query_tokens: Sequence[str]
+) -> str:
+    """Return the subsequence from ``sentence_tokens`` aligned with ``query_tokens``."""
+
+    matched: List[str] = []
+    for sentence_token, query_token in zip(sentence_tokens, query_tokens):
+        if _is_alignment_marker(query_token) or _is_alignment_marker(sentence_token):
+            continue
+        matched.append(sentence_token)
+    return "".join(matched)
 
 
 class LocalAlignment:
     """Local alignment between a sentence IPA string and a query IPA string."""
 
-    def __init__(self, method: str = "lingpy", aline: Optional[ALINE] = None) -> None:
-        if method not in {"lingpy", "aline"}:
-            raise ValueError("method must be 'lingpy' or 'aline'")
-        self.method = method
-        self.aline = aline or (ALINE(mode="local") if method == "aline" else None)
+    def align(self, sentence_ipa: str, query_ipa: str) -> List[Tuple[float, str]]:
+        """Align ``sentence_ipa`` against ``query_ipa`` using ``lingpy``."""
 
-    def align(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
-        if self.method == "lingpy":
-            return self._align_with_lingpy(sentence_ipa, query_ipa)
-        return self._align_with_aline(sentence_ipa, query_ipa)
-
-    @staticmethod
-    def _build_alignment_result(
-        score: float, sentence_tokens: Sequence[str], query_tokens: Sequence[str]
-    ) -> AlignmentResult:
-        sentence_alignment = "".join(sentence_tokens)
-        query_alignment = "".join(query_tokens)
-        sentence_subsequence = sentence_alignment.replace("-", "")
-        return AlignmentResult(
-            score=score,
-            sentence_subsequence=sentence_subsequence,
-            sentence_alignment=sentence_alignment,
-            query_alignment=query_alignment,
-        )
-
-    def _align_with_lingpy(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
-        alignments = we_align(sentence_ipa, query_ipa)
-        if not alignments:
-            return AlignmentResult(0.0, "", "", "")
-        sentence_tokens, query_tokens, score = alignments[0]
-        return self._build_alignment_result(score, sentence_tokens, query_tokens)
-
-    def _align_with_aline(self, sentence_ipa: str, query_ipa: str) -> AlignmentResult:
-        if self.aline is None:
-            raise RuntimeError("ALINE aligner not initialized")
-        score, sentence_alignment, query_alignment = self.aline.alignment(
-            sentence_ipa, query_ipa
-        )
-        subsequence = self._extract_subsequence(sentence_alignment)
-        return AlignmentResult(
-            score=score,
-            sentence_subsequence=subsequence,
-            sentence_alignment=sentence_alignment,
-            query_alignment=query_alignment,
-        )
-
-    @staticmethod
-    def _extract_subsequence(alignment: str) -> str:
-        if "‖" in alignment:
-            parts = alignment.split("‖")
-            if len(parts) >= 3:
-                segment = parts[1]
-            else:
-                segment = alignment
-        else:
-            segment = alignment
-        return "".join(segment.split())
+        alignment = pw_align(sentence_ipa, query_ipa, mode="overlap")
+        if not alignment:
+            return []
+        sentence_tokens, query_tokens, score = alignment
+        matched = _extract_matched_subsequence(sentence_tokens, query_tokens)
+        if not matched:
+            return []
+        return [(score, matched)]
 
 
 def local_align_sentence(
     sentence_ipa: str,
     query_ipas: Sequence[str],
-    aligner: Optional[LocalAlignment] = None,
-) -> List[Tuple[str, AlignmentResult]]:
+    aligner: LocalAlignment | None = None,
+) -> List[Tuple[str, List[Tuple[float, str]]]]:
     """Align ``sentence_ipa`` against each query in ``query_ipas``."""
 
     local_aligner = aligner or LocalAlignment()
-    results: List[Tuple[str, AlignmentResult]] = []
+    results: List[Tuple[str, List[Tuple[float, str]]]] = []
     for query in query_ipas:
         results.append((query, local_aligner.align(sentence_ipa, query)))
     return results
