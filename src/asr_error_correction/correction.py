@@ -4,24 +4,13 @@ from __future__ import annotations
 import itertools
 import pickle
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import dataclass
-from typing import Iterable, List, Sequence
+from typing import Iterable, Iterator, List, Sequence, Tuple
 
 from .alignment import LocalAlignment
-from .conversion import GraphemePhoneme
 from .lexicon import IPALexicon
+from .models import AlignmentResult, GraphemePhoneme, ReplacementPlan
 
 __all__ = ["ASRCorrector"]
-
-
-@dataclass(frozen=True)
-class _Replacement:
-    """Description of a replacement within a sentence string."""
-
-    score: float
-    start: int
-    end: int
-    replacement: GraphemePhoneme
 
 
 class ASRCorrector:
@@ -58,22 +47,29 @@ class ASRCorrector:
 
     def _collect_best_matches(
         self, sentence_gp: GraphemePhoneme
-    ) -> Sequence[_Replacement]:
+    ) -> Sequence[ReplacementPlan]:
         entries = list(self.lexicon.entries.values())
         if not entries:
             return []
 
-        candidates: List[_Replacement] = []
-        can_parallelize = self.use_concurrency > 1 and len(entries) > 1
-        if can_parallelize:
-            try:
-                pickle.dumps((sentence_gp, self.aligner))
-            except (pickle.PicklingError, AttributeError, TypeError):
-                can_parallelize = False
+        candidates = list(self._iter_replacements(sentence_gp, entries))
+        if not candidates:
+            return []
 
-        if can_parallelize:
-            max_workers = self.use_concurrency
-            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        best_score = max(candidate.score for candidate in candidates)
+        best_matches = (
+            candidate for candidate in candidates if candidate.score == best_score
+        )
+
+        return self._filter_overlaps(best_matches)
+
+    def _iter_replacements(
+        self,
+        sentence_gp: GraphemePhoneme,
+        entries: Sequence[GraphemePhoneme],
+    ) -> Iterator[ReplacementPlan]:
+        if self._should_parallelize(sentence_gp, entries):
+            with ProcessPoolExecutor(max_workers=self.use_concurrency) as executor:
                 for replacements in executor.map(
                     ASRCorrector._align_entry,
                     itertools.repeat(sentence_gp),
@@ -81,24 +77,23 @@ class ASRCorrector:
                     itertools.repeat(self.score_threshold),
                     itertools.repeat(self.aligner),
                 ):
-                    candidates.extend(replacements)
+                    yield from replacements
         else:
             for entry in entries:
-                candidates.extend(
-                    self._align_entry(
-                        sentence_gp, entry, self.score_threshold, self.aligner
-                    )
+                yield from self._align_entry(
+                    sentence_gp, entry, self.score_threshold, self.aligner
                 )
 
-        if not candidates:
-            return []
-
-        best_score = max(candidate.score for candidate in candidates)
-        best_matches = [
-            candidate for candidate in candidates if candidate.score == best_score
-        ]
-
-        return self._filter_overlaps(best_matches)
+    def _should_parallelize(
+        self, sentence_gp: GraphemePhoneme, entries: Sequence[GraphemePhoneme]
+    ) -> bool:
+        if self.use_concurrency <= 1 or len(entries) <= 1:
+            return False
+        try:
+            pickle.dumps((sentence_gp, self.aligner))
+        except (pickle.PicklingError, AttributeError, TypeError):
+            return False
+        return True
 
     @staticmethod
     def _align_entry(
@@ -106,18 +101,28 @@ class ASRCorrector:
         entry: GraphemePhoneme,
         score_threshold: float,
         aligner: LocalAlignment,
-    ) -> List[_Replacement]:
-        replacements: List[_Replacement] = []
-        for score, start, end, _ in aligner.align(sentence_gp, entry):
-            if score < score_threshold:
+    ) -> List[ReplacementPlan]:
+        replacements: List[ReplacementPlan] = []
+        for raw_result in aligner.align(sentence_gp, entry):
+            result = ASRCorrector._coerce_alignment_result(raw_result)
+            if result.score < score_threshold:
                 continue
-            replacements.append(_Replacement(score, start, end, entry))
+            replacements.append(
+                ReplacementPlan(
+                    score=result.score,
+                    start=result.start,
+                    end=result.end,
+                    replacement=entry,
+                )
+            )
         return replacements
 
     @staticmethod
-    def _filter_overlaps(matches: Iterable[_Replacement]) -> List[_Replacement]:
+    def _filter_overlaps(
+        matches: Iterable[ReplacementPlan],
+    ) -> List[ReplacementPlan]:
         ordered = sorted(matches, key=lambda match: (match.start, -match.end))
-        filtered: List[_Replacement] = []
+        filtered: List[ReplacementPlan] = []
         current_end = -1
         for match in ordered:
             if match.start < current_end:
@@ -127,7 +132,9 @@ class ASRCorrector:
         return filtered
 
     @staticmethod
-    def _apply_replacements(text: str, matches: Sequence[_Replacement]) -> str:
+    def _apply_replacements(
+        text: str, matches: Sequence[ReplacementPlan]
+    ) -> str:
         cursor = 0
         parts: List[str] = []
         for match in matches:
@@ -136,4 +143,15 @@ class ASRCorrector:
             cursor = match.end
         parts.append(text[cursor:])
         return "".join(parts)
+
+    @staticmethod
+    def _coerce_alignment_result(
+        result: AlignmentResult | Tuple[float, int, int, GraphemePhoneme]
+    ) -> AlignmentResult:
+        if isinstance(result, AlignmentResult):
+            return result
+        score, start, end, match = result
+        if not isinstance(match, GraphemePhoneme):  # pragma: no cover - safety net
+            raise TypeError("Alignment result must contain a GraphemePhoneme match")
+        return AlignmentResult(score=score, start=start, end=end, match=match)
 

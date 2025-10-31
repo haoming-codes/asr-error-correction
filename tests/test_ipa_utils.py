@@ -11,6 +11,7 @@ if str(SRC_ROOT) not in sys.path:
 import pytest
 
 from asr_error_correction import (
+    AlignmentResult,
     ASRCorrector,
     GraphemePhoneme,
     IPAConverter,
@@ -120,10 +121,10 @@ def test_local_alignment_with_lingpy(monkeypatch):
     aligner = LocalAlignment()
     result = aligner.align(sentence, query)
 
-    assert result[0][0] == pytest.approx(0.75)
-    assert result[0][1] == 1
-    assert result[0][2] == 8
-    matched_gp = result[0][3]
+    assert result[0].score == pytest.approx(0.75)
+    assert result[0].start == 1
+    assert result[0].end == 8
+    matched_gp = result[0].match
     assert matched_gp.grapheme_list == ("好", "hello")
     assert matched_gp.phoneme_list == ("xɑʊ", "hɛloʊ")
     assert matched_gp.grapheme_str == "好 hello"
@@ -145,16 +146,28 @@ def test_local_align_sentence_uses_aligner(monkeypatch):
 
         def align(self, sentence, query):
             self.calls.append((sentence, query))
-            return [(1.0, 0, len(query.grapheme_str), query)]
+            return [
+                AlignmentResult(
+                    score=1.0,
+                    start=0,
+                    end=len(query.grapheme_str),
+                    match=query,
+                )
+            ]
 
     aligner = DummyAligner()
     results = local_align_sentence(sentence, [query_one, query_two], aligner)
 
     assert aligner.calls == [(sentence, query_one), (sentence, query_two)]
-    assert results == [
-        (query_one, [(1.0, 0, len(query_one.grapheme_str), query_one)]),
-        (query_two, [(1.0, 0, len(query_two.grapheme_str), query_two)]),
-    ]
+    assert results[0][0] is query_one
+    assert results[0][1][0].score == 1.0
+    assert results[0][1][0].end == len(query_one.grapheme_str)
+    assert results[0][1][0].match is query_one
+
+    assert results[1][0] is query_two
+    assert results[1][1][0].score == 1.0
+    assert results[1][1][0].end == len(query_two.grapheme_str)
+    assert results[1][1][0].match is query_two
 
 
 def _build_sentence_gp() -> GraphemePhoneme:
@@ -194,11 +207,13 @@ def test_asr_corrector_replaces_highest_scoring_match(monkeypatch):
     class DummyAligner:
         def align(self, sentence, query):
             if query is replacement_entry:
-                return [(0.9, 1, 8, match)]
+                return [AlignmentResult(score=0.9, start=1, end=8, match=match)]
             if query is lower_entry:
                 lower_match = sentence.subsequence_covering_span(0, 2)
                 assert lower_match is not None
-                return [(0.5, 0, 2, lower_match)]
+                return [
+                    AlignmentResult(score=0.5, start=0, end=2, match=lower_match)
+                ]
             return []
 
     lexicon = IPALexicon()
@@ -226,7 +241,7 @@ def test_asr_corrector_respects_score_threshold(monkeypatch):
         def align(self, sentence, query):
             match = sentence.subsequence_covering_span(2, 10)
             assert match is not None
-            return [(0.3, 1, 8, match)]
+            return [AlignmentResult(score=0.3, start=1, end=8, match=match)]
 
     lexicon = IPALexicon()
     lexicon.converter = DummyConverter()

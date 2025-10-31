@@ -6,7 +6,7 @@ from typing import List, Sequence, Tuple
 
 from lingpy.align import pw_align
 
-from .conversion import GraphemePhoneme
+from .models import AlignmentResult, GraphemePhoneme
 
 logging.getLogger("lingpy").setLevel(logging.WARNING)
 
@@ -58,7 +58,7 @@ class LocalAlignment:
 
     def align(
         self, sentence: GraphemePhoneme, query: GraphemePhoneme
-    ) -> List[Tuple[float, int, int, GraphemePhoneme]]:
+    ) -> List[AlignmentResult]:
         """Align ``sentence`` against ``query`` using ``lingpy``."""
 
         alignment = pw_align(sentence.phoneme_str, query.phoneme_str, mode="overlap")
@@ -84,22 +84,25 @@ class LocalAlignment:
         matched = sentence.subsequence_covering_span(phoneme_start, phoneme_end)
         if matched is None:
             return []
-        return [(score, grapheme_start, grapheme_end, matched)]
+        return [
+            AlignmentResult(
+                score=score,
+                start=grapheme_start,
+                end=grapheme_end,
+                match=matched,
+            )
+        ]
 
 
 def local_align_sentence(
     sentence: GraphemePhoneme,
     query_graphemes: Sequence[GraphemePhoneme],
     aligner: LocalAlignment | None = None,
-) -> List[
-    Tuple[GraphemePhoneme, List[Tuple[float, int, int, GraphemePhoneme]]]
-]:
+) -> List[Tuple[GraphemePhoneme, List[AlignmentResult]]]:
     """Align ``sentence`` against each query in ``query_graphemes``."""
 
     local_aligner = aligner or LocalAlignment()
-    results: List[
-        Tuple[GraphemePhoneme, List[Tuple[float, int, int, GraphemePhoneme]]]
-    ] = []
+    results: List[Tuple[GraphemePhoneme, List[AlignmentResult]]] = []
     for query in query_graphemes:
         results.append((query, local_aligner.align(sentence, query)))
     return results
