@@ -1,6 +1,7 @@
 """ASR correction utilities driven by phonetic alignment."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence
 
@@ -52,18 +53,31 @@ class ASRCorrector:
     def _collect_best_matches(
         self, sentence_gp: GraphemePhoneme
     ) -> Sequence[_Replacement]:
-        best_score: float | None = None
-        best_matches: List[_Replacement] = []
+        entries = list(self.lexicon.entries.values())
+        if not entries:
+            return []
 
-        for entry in self.lexicon.entries.values():
+        def _align_entry(entry: GraphemePhoneme) -> List[_Replacement]:
+            replacements: List[_Replacement] = []
             for score, start, end, _ in self.aligner.align(sentence_gp, entry):
                 if score < self.score_threshold:
                     continue
-                if best_score is None or score > best_score:
-                    best_score = score
-                    best_matches = []
-                if best_score is not None and score == best_score:
-                    best_matches.append(_Replacement(score, start, end, entry))
+                replacements.append(_Replacement(score, start, end, entry))
+            return replacements
+
+        candidates: List[_Replacement] = []
+        max_workers = min(32, len(entries)) or None
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for replacements in executor.map(_align_entry, entries):
+                candidates.extend(replacements)
+
+        if not candidates:
+            return []
+
+        best_score = max(candidate.score for candidate in candidates)
+        best_matches = [
+            candidate for candidate in candidates if candidate.score == best_score
+        ]
 
         return self._filter_overlaps(best_matches)
 
