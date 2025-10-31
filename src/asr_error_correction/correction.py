@@ -31,11 +31,13 @@ class ASRCorrector:
         *,
         score_threshold: float = 0.0,
         aligner: LocalAlignment | None = None,
-        use_concurrency: bool = True,
+        use_concurrency: int = 32,
     ) -> None:
         self.lexicon = lexicon
         self.score_threshold = score_threshold
         self.aligner = aligner or LocalAlignment()
+        if use_concurrency < 0:
+            raise ValueError("use_concurrency must be non-negative")
         self.use_concurrency = use_concurrency
 
     def correct(self, sentence: str) -> str:
@@ -68,8 +70,8 @@ class ASRCorrector:
             return replacements
 
         candidates: List[_Replacement] = []
-        if self.use_concurrency and len(entries) > 1:
-            max_workers = min(32, len(entries)) or None
+        if self.use_concurrency > 1 and len(entries) > 1:
+            max_workers = self.use_concurrency
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 for replacements in executor.map(_align_entry, entries):
                     candidates.extend(replacements)
