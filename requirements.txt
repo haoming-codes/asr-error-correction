@@ -5,4 +5,8 @@ eng_to_ipa
 dragonmapper
 sktime
 openai
+num2words
+tqdm
+pandas
+python-calamine
 abydos @ git+https://github.com/denizberkin/abydos.git
