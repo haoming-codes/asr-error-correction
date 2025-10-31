@@ -1,7 +1,9 @@
 """ASR correction utilities driven by phonetic alignment."""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import itertools
+import pickle
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence
 
@@ -31,10 +33,14 @@ class ASRCorrector:
         *,
         score_threshold: float = 0.0,
         aligner: LocalAlignment | None = None,
+        use_concurrency: int = 32,
     ) -> None:
         self.lexicon = lexicon
         self.score_threshold = score_threshold
         self.aligner = aligner or LocalAlignment()
+        if use_concurrency < 0:
+            raise ValueError("use_concurrency must be non-negative")
+        self.use_concurrency = use_concurrency
 
     def correct(self, sentence: str) -> str:
         """Return ``sentence`` with high-scoring alignments replaced."""
@@ -57,19 +63,32 @@ class ASRCorrector:
         if not entries:
             return []
 
-        def _align_entry(entry: GraphemePhoneme) -> List[_Replacement]:
-            replacements: List[_Replacement] = []
-            for score, start, end, _ in self.aligner.align(sentence_gp, entry):
-                if score < self.score_threshold:
-                    continue
-                replacements.append(_Replacement(score, start, end, entry))
-            return replacements
-
         candidates: List[_Replacement] = []
-        max_workers = min(32, len(entries)) or None
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for replacements in executor.map(_align_entry, entries):
-                candidates.extend(replacements)
+        can_parallelize = self.use_concurrency > 1 and len(entries) > 1
+        if can_parallelize:
+            try:
+                pickle.dumps((sentence_gp, self.aligner))
+            except (pickle.PicklingError, AttributeError, TypeError):
+                can_parallelize = False
+
+        if can_parallelize:
+            max_workers = self.use_concurrency
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                for replacements in executor.map(
+                    ASRCorrector._align_entry,
+                    itertools.repeat(sentence_gp),
+                    entries,
+                    itertools.repeat(self.score_threshold),
+                    itertools.repeat(self.aligner),
+                ):
+                    candidates.extend(replacements)
+        else:
+            for entry in entries:
+                candidates.extend(
+                    self._align_entry(
+                        sentence_gp, entry, self.score_threshold, self.aligner
+                    )
+                )
 
         if not candidates:
             return []
@@ -80,6 +99,20 @@ class ASRCorrector:
         ]
 
         return self._filter_overlaps(best_matches)
+
+    @staticmethod
+    def _align_entry(
+        sentence_gp: GraphemePhoneme,
+        entry: GraphemePhoneme,
+        score_threshold: float,
+        aligner: LocalAlignment,
+    ) -> List[_Replacement]:
+        replacements: List[_Replacement] = []
+        for score, start, end, _ in aligner.align(sentence_gp, entry):
+            if score < score_threshold:
+                continue
+            replacements.append(_Replacement(score, start, end, entry))
+        return replacements
 
     @staticmethod
     def _filter_overlaps(matches: Iterable[_Replacement]) -> List[_Replacement]:
