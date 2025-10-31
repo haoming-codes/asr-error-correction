@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Dict, Iterable, Optional
+from tqdm import tqdm
 
 from .conversion import GraphemePhoneme, IPAConverter
 
@@ -18,7 +19,7 @@ class IPALexicon:
         self.entries: Dict[str, GraphemePhoneme] = {}
 
     def add_phrases(self, phrases: Iterable[str]) -> None:
-        for phrase in phrases:
+        for phrase in tqdm(phrases):
             if phrase is None:
                 continue
             self.entries[phrase] = self.converter.convert_to_grapheme_phoneme(phrase)
