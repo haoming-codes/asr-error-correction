@@ -5,6 +5,7 @@ import logging
 from typing import List, Sequence, Tuple
 
 from lingpy.align import pw_align
+from lingpy.sequence.sound_classes import ipa2tokens
 
 from .conversion import GraphemePhoneme
 
@@ -61,7 +62,7 @@ class LocalAlignment:
     ) -> List[Tuple[float, int, int, GraphemePhoneme]]:
         """Align ``sentence`` against ``query`` using ``lingpy``."""
 
-        alignment = pw_align(sentence.phoneme_str, query.phoneme_str, mode="overlap")
+        alignment = pw_align(ipa2tokens(sentence.phoneme_str), ipa2tokens(query.phoneme_str), mode="overlap")
         if not alignment:
             return []
         sentence_tokens, query_tokens, score = alignment
