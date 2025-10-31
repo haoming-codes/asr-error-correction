@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Dict, Iterable, Optional
 from tqdm import tqdm
 
-from .conversion import GraphemePhoneme, IPAConverter
+from .conversion import IPAConverter
+from .models import GraphemePhoneme
 
 __all__ = ["IPALexicon"]
 
