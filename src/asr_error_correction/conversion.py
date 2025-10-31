@@ -1,12 +1,18 @@
 """Tools for converting mixed English/Chinese text into IPA."""
 from __future__ import annotations
 
+from decimal import Decimal
 import re
 import unicodedata
-from typing import Iterable, List, Tuple
+from typing import Iterable, Iterator, List, Tuple
 
 from dragonmapper.hanzi import to_ipa as hanzi_to_ipa
 from eng_to_ipa import convert as eng_to_ipa_convert
+
+try:  # pragma: no cover - import is exercised indirectly in tests
+    from num2words import num2words
+except ImportError:  # pragma: no cover - dependency is optional at runtime
+    num2words = None  # type: ignore[assignment]
 
 from .models import GraphemePhoneme
 from .tokenization import TokenizedSegment, tokenize_mixed_text
@@ -18,6 +24,7 @@ __all__ = ["GraphemePhoneme", "IPAConverter", "TokenizedSegment"]
 _STRESS_TRANSLATION = str.maketrans("", "", "ˈˌ")
 _TONE_TRANSLATION = str.maketrans("", "", "012345˥˦˧˨˩˩˨˧˦˥")
 _WHITESPACE_RE = re.compile(r"\s+")
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 
 
 class IPAConverter:
@@ -30,11 +37,13 @@ class IPAConverter:
         remove_stress_marks: bool = False,
         strip_whitespace: bool = False,
         remove_punctuation: bool = False,
+        num2words_lang: str | None = None,
     ) -> None:
         self.remove_tone_marks = remove_tone_marks
         self.remove_stress_marks = remove_stress_marks
         self.strip_whitespace = strip_whitespace
         self.remove_punctuation = remove_punctuation
+        self.num2words_lang = num2words_lang
 
     def tokenize(self, text: str) -> Iterable[TokenizedSegment]:
         """Yield the detected segments from ``text``."""
@@ -47,13 +56,12 @@ class IPAConverter:
 
         converted: List[Tuple[str, bool]] = []
         for token in self.tokenize(text):
-            value = self._convert_segment(token)
-            is_ipa_segment = token.is_alpha or token.is_chinese
-            if self.remove_punctuation and not is_ipa_segment:
-                value = self._remove_punctuation(value)
-                if not value:
-                    continue
-            converted.append((value, is_ipa_segment))
+            for value, is_ipa_segment in self._iter_converted_values(token):
+                if self.remove_punctuation and not is_ipa_segment:
+                    value = self._remove_punctuation(value)
+                    if not value:
+                        continue
+                converted.append((value, is_ipa_segment))
 
         processed: List[str] = []
         for value, is_ipa_segment in converted:
@@ -100,6 +108,19 @@ class IPAConverter:
                 phoneme_list.append(sanitized)
                 phoneme_spans.append((phoneme_cursor, phoneme_cursor + len(sanitized)))
                 phoneme_cursor += len(sanitized)
+            else:
+                for start, end, phoneme in self._iter_numeric_phonemes(token):
+                    if phoneme is None:
+                        continue
+                    phoneme = self._apply_marker_options(phoneme)
+                    sanitized = self._sanitize_phoneme(phoneme)
+                    if not sanitized:
+                        continue
+                    grapheme_list.append(text[start:end])
+                    grapheme_spans.append((start, end))
+                    phoneme_list.append(sanitized)
+                    phoneme_spans.append((phoneme_cursor, phoneme_cursor + len(sanitized)))
+                    phoneme_cursor += len(sanitized)
 
         return GraphemePhoneme(
             grapheme_str=text,
@@ -110,13 +131,30 @@ class IPAConverter:
             phoneme_spans=tuple(phoneme_spans),
         )
 
-    @staticmethod
-    def _convert_segment(segment: TokenizedSegment) -> str:
+    def _iter_converted_values(
+        self, segment: TokenizedSegment
+    ) -> Iterator[Tuple[str, bool]]:
         if segment.is_chinese:
-            return IPAConverter._convert_chinese(segment.raw)
+            yield IPAConverter._convert_chinese(segment.raw), True
+            return
         if segment.is_alpha:
-            return IPAConverter._convert_english(segment.raw)
-        return segment.raw
+            yield IPAConverter._convert_english(segment.raw), True
+            return
+
+        last = 0
+        for match in _NUMBER_RE.finditer(segment.raw):
+            start, end = match.span()
+            if start > last:
+                yield segment.raw[last:start], False
+            number_value = self._convert_number(match.group(0))
+            if number_value is None:
+                yield segment.raw[start:end], False
+            else:
+                yield number_value, True
+            last = end
+
+        if last < len(segment.raw):
+            yield segment.raw[last:], False
 
     @staticmethod
     def _sanitize_phoneme(value: str) -> str:
@@ -150,3 +188,30 @@ class IPAConverter:
         return "".join(
             ch for ch in value if not unicodedata.category(ch).startswith("P")
         )
+
+    def _convert_number(self, number: str) -> str | None:
+        if not self.num2words_lang:
+            return None
+        if num2words is None:  # pragma: no cover - defensive branch
+            raise RuntimeError(
+                "num2words is required when num2words_lang is configured"
+            )
+
+        if "." in number:
+            value: int | Decimal = Decimal(number)
+        else:
+            value = int(number)
+
+        words = num2words(value, lang=self.num2words_lang)
+        if self.num2words_lang.lower().startswith("zh"):
+            return IPAConverter._convert_chinese(words)
+        return IPAConverter._convert_english(words)
+
+    def _iter_numeric_phonemes(
+        self, segment: TokenizedSegment
+    ) -> Iterator[Tuple[int, int, str | None]]:
+        for match in _NUMBER_RE.finditer(segment.raw):
+            start, end = match.span()
+            yield segment.start + start, segment.start + end, self._convert_number(
+                match.group(0)
+            )

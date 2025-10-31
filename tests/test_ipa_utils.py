@@ -28,6 +28,21 @@ def patch_converters(monkeypatch):
     monkeypatch.setattr(conversion, "eng_to_ipa_convert", lambda token: f"en({token})")
     monkeypatch.setattr(conversion, "hanzi_to_ipa", lambda text: f"zh({text})")
 
+    mapping = {
+        ("en", "3"): "three",
+        ("en", "3.14"): "three point one four",
+        ("en", "361"): "three hundred sixty-one",
+        ("zh_CN", "361"): "三百六十一",
+    }
+
+    def fake_num2words(value, *, lang):
+        key = (lang, str(value))
+        if key not in mapping:
+            raise AssertionError(f"Unexpected num2words request: {key}")
+        return mapping[key]
+
+    monkeypatch.setattr(conversion, "num2words", fake_num2words)
+
 
 def test_ipa_converter_handles_mixed_languages():
     converter = IPAConverter()
@@ -59,6 +74,36 @@ def test_ipa_converter_can_remove_punctuation():
     assert converter.convert(text) == "en(Hello) zh(世界) en(N) en(A) en(S) en(A)"
 
 
+def test_ipa_converter_converts_numbers_to_words():
+    converter = IPAConverter(num2words_lang="en")
+
+    text = "Call 361 now."
+
+    assert (
+        converter.convert(text)
+        == "en(Call) en(three hundred sixty-one) en(now)."
+    )
+
+
+def test_ipa_converter_handles_decimal_numbers():
+    converter = IPAConverter(num2words_lang="en")
+
+    text = "Pi is about 3.14. Also 3."
+
+    assert (
+        converter.convert(text)
+        == "en(Pi) en(is) en(about) en(three point one four). en(Also) en(three)."
+    )
+
+
+def test_ipa_converter_converts_numbers_in_chinese():
+    converter = IPAConverter(num2words_lang="zh_CN")
+
+    text = "今天361"
+
+    assert converter.convert(text) == "zh(今天)zh(三百六十一)"
+
+
 def test_ipalexicon_save_and_load_roundtrip(tmp_path: Path):
     converter = IPAConverter()
     lexicon = IPALexicon(converter)
@@ -87,6 +132,16 @@ def test_converter_builds_grapheme_phoneme_structure():
     assert gp.grapheme_list == ("你", "好", "Hello", "世", "界")
     assert gp.phoneme_list == ("zh你", "zh好", "enHello", "zh世", "zh界")
     assert gp.phoneme_str == "zh你zh好enHellozh世zh界"
+
+
+def test_converter_grapheme_phoneme_includes_numbers():
+    converter = IPAConverter(num2words_lang="en")
+
+    gp = converter.convert_to_grapheme_phoneme("Call 361")
+
+    assert gp.grapheme_list == ("Call", "361")
+    assert gp.phoneme_list == ("enCall", "enthreehundredsixtyone")
+    assert gp.phoneme_str == "enCallenthreehundredsixtyone"
 
 
 def _build_sentence_and_query() -> tuple[GraphemePhoneme, GraphemePhoneme]:
