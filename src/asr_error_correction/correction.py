@@ -31,10 +31,12 @@ class ASRCorrector:
         *,
         score_threshold: float = 0.0,
         aligner: LocalAlignment | None = None,
+        use_concurrency: bool = True,
     ) -> None:
         self.lexicon = lexicon
         self.score_threshold = score_threshold
         self.aligner = aligner or LocalAlignment()
+        self.use_concurrency = use_concurrency
 
     def correct(self, sentence: str) -> str:
         """Return ``sentence`` with high-scoring alignments replaced."""
@@ -66,10 +68,14 @@ class ASRCorrector:
             return replacements
 
         candidates: List[_Replacement] = []
-        max_workers = min(32, len(entries)) or None
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for replacements in executor.map(_align_entry, entries):
-                candidates.extend(replacements)
+        if self.use_concurrency and len(entries) > 1:
+            max_workers = min(32, len(entries)) or None
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                for replacements in executor.map(_align_entry, entries):
+                    candidates.extend(replacements)
+        else:
+            for entry in entries:
+                candidates.extend(_align_entry(entry))
 
         if not candidates:
             return []
