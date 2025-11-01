@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 
@@ -59,6 +60,39 @@ def test_ipa_converter_can_remove_punctuation():
     assert converter.convert(text) == "en(Hello) zh(世界) en(N) en(A) en(S) en(A)"
 
 
+def test_ipa_converter_converts_numbers_in_english():
+    converter = IPAConverter(num2words_lang="en")
+
+    text = "Flight 361 departs."
+    words = conversion.num2words("361", lang="en")
+
+    expected = f"en(Flight) en({words}) en(departs)."
+
+    assert converter.convert(text) == expected
+
+
+def test_ipa_converter_converts_numbers_in_chinese():
+    converter = IPAConverter(num2words_lang="zh_CN")
+
+    text = "我有361个苹果"
+    words = conversion.num2words("361", lang="zh_CN")
+
+    expected = f"zh(我有)zh({words})zh(个苹果)"
+
+    assert converter.convert(text) == expected
+
+
+def test_ipa_converter_handles_decimal_numbers():
+    converter = IPAConverter(num2words_lang="en")
+
+    text = "Value: 24,120.10."
+    words = conversion.num2words("24,120.10", lang="en")
+
+    expected = f"en(Value): en({words})."
+
+    assert converter.convert(text) == expected
+
+
 def test_ipalexicon_save_and_load_roundtrip(tmp_path: Path):
     converter = IPAConverter()
     lexicon = IPALexicon(converter)
@@ -87,6 +121,17 @@ def test_converter_builds_grapheme_phoneme_structure():
     assert gp.grapheme_list == ("你", "好", "Hello", "世", "界")
     assert gp.phoneme_list == ("zh你", "zh好", "enHello", "zh世", "zh界")
     assert gp.phoneme_str == "zh你zh好enHellozh世zh界"
+
+
+def test_converter_grapheme_phoneme_includes_numbers():
+    converter = IPAConverter(num2words_lang="en")
+
+    gp = converter.convert_to_grapheme_phoneme("361 hello")
+
+    expected_number = re.sub(r"\W", "", conversion.num2words("361", lang="en"))
+
+    assert gp.grapheme_list[:2] == ("361", "hello")
+    assert gp.phoneme_list[0] == f"en{expected_number}"
 
 
 def _build_sentence_and_query() -> tuple[GraphemePhoneme, GraphemePhoneme]:

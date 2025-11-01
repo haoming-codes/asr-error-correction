@@ -5,7 +5,7 @@ eng_to_ipa
 dragonmapper
 sktime
 openai
-num2words
+num2words @ git+https://github.com/savoirfairelinux/num2words.git@master
 tqdm
 pandas
 python-calamine

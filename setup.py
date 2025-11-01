@@ -23,11 +23,11 @@ setup(
         "dragonmapper",
         "sktime",
         "openai",
-        "num2words",
         "tqdm",
         "pandas",
         "python-calamine",
         "abydos @ git+https://github.com/denizberkin/abydos.git",
+        "num2words @ git+https://github.com/savoirfairelinux/num2words.git@master"
     ],
     python_requires=">=3.8",
 )
