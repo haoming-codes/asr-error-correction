@@ -39,29 +39,41 @@ class ASRCorrector:
 
         sentence_gp = self.lexicon.converter.convert_to_grapheme_phoneme(sentence)
 
-        best_matches = self._collect_best_matches(sentence_gp)
-        if not best_matches:
-            return sentence_gp.grapheme_str
-
-        return self._apply_replacements(sentence_gp.grapheme_str, best_matches)
-
-    def _collect_best_matches(
-        self, sentence_gp: GraphemePhoneme
-    ) -> Sequence[ReplacementPlan]:
-        entries = list(self.lexicon.entries.values())
-        if not entries:
-            return []
-
-        candidates = list(self._iter_replacements(sentence_gp, entries))
+        candidates = self._candidate_replacements(sentence_gp)
         if not candidates:
-            return []
+            return sentence_gp.grapheme_str
 
         best_score = max(candidate.score for candidate in candidates)
         best_matches = (
             candidate for candidate in candidates if candidate.score == best_score
         )
 
-        return self._filter_overlaps(best_matches)
+        filtered_matches = self._filter_overlaps(best_matches)
+        if not filtered_matches:
+            return sentence_gp.grapheme_str
+
+        return self._apply_replacements(sentence_gp.grapheme_str, filtered_matches)
+
+    def candidate_replacements(self, sentence: str) -> List[ReplacementPlan]:
+        """Return all candidate replacements for ``sentence`` above the threshold."""
+
+        if not sentence:
+            return []
+
+        sentence_gp = self.lexicon.converter.convert_to_grapheme_phoneme(sentence)
+        return self._candidate_replacements(sentence_gp)
+
+    def _candidate_replacements(
+        self, sentence_gp: GraphemePhoneme
+    ) -> List[ReplacementPlan]:
+        entries = list(self.lexicon.entries.values())
+        if not entries:
+            return []
+
+        candidates = list(self._iter_replacements(sentence_gp, entries))
+        return sorted(
+            candidates, key=lambda match: (-match.score, match.start, match.end)
+        )
 
     def _iter_replacements(
         self,
