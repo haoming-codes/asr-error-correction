@@ -29,6 +29,55 @@ def patch_converters(monkeypatch):
     monkeypatch.setattr(conversion, "eng_to_ipa_convert", lambda token: f"en({token})")
     monkeypatch.setattr(conversion, "hanzi_to_ipa", lambda text: f"zh({text})")
 
+    digit_words = {
+        "0": "zero",
+        "1": "one",
+        "2": "two",
+        "3": "three",
+        "4": "four",
+        "5": "five",
+        "6": "six",
+        "7": "seven",
+        "8": "eight",
+        "9": "nine",
+    }
+    digit_hanzi = {
+        "0": "零",
+        "1": "一",
+        "2": "二",
+        "3": "三",
+        "4": "四",
+        "5": "五",
+        "6": "六",
+        "7": "七",
+        "8": "八",
+        "9": "九",
+    }
+
+    def fake_num2words(number, *, lang="en", **_):
+        text = str(number)
+        if lang.startswith("zh"):
+            return "".join(digit_hanzi.get(ch, ch) for ch in text if ch.isdigit())
+
+        text = text.replace(",", "")
+        sign = "minus " if text.startswith("-") else ""
+        if text.startswith(("+", "-")):
+            text = text[1:]
+
+        if "." in text:
+            integer, fractional = text.split(".", 1)
+            integer_words = " ".join(digit_words.get(ch, ch) for ch in integer if ch.isdigit())
+            fractional_words = " ".join(
+                digit_words.get(ch, ch) for ch in fractional if ch.isdigit()
+            )
+            components = [part for part in [integer_words, "point", fractional_words] if part]
+            return f"{sign}{' '.join(components)}".strip()
+
+        digits = " ".join(digit_words.get(ch, ch) for ch in text if ch.isdigit())
+        return f"{sign}{digits}".strip()
+
+    monkeypatch.setattr(conversion, "num2words", fake_num2words)
+
 
 def test_ipa_converter_handles_mixed_languages():
     converter = IPAConverter()
@@ -273,6 +322,58 @@ def test_asr_corrector_replaces_highest_scoring_match(monkeypatch):
     corrected = corrector.correct("你好 hello world")
 
     assert corrected == "你号halo world"
+
+
+def test_asr_corrector_lists_candidate_replacements(monkeypatch):
+    sentence_gp = _build_sentence_gp()
+
+    replacement_entry = GraphemePhoneme.from_components(
+        "你号halo",
+        ["你", "号", "halo"],
+        "nixɑhalo",
+        ["ni", "xɑ", "halo"],
+    )
+    match = sentence_gp.subsequence_covering_span(0, 9)
+    assert match is not None
+
+    lower_entry = GraphemePhoneme.from_components(
+        "你好",
+        ["你", "好"],
+        "nixɑʊ",
+        ["ni", "xɑʊ"],
+    )
+
+    class DummyConverter:
+        def convert_to_grapheme_phoneme(self, text: str) -> GraphemePhoneme:
+            assert text == "你好 hello world"
+            return sentence_gp
+
+    class DummyAligner:
+        def align(self, sentence, query):
+            if query is replacement_entry:
+                return [AlignmentResult(score=0.9, start=1, end=8, match=match)]
+            if query is lower_entry:
+                lower_match = sentence.subsequence_covering_span(0, 2)
+                assert lower_match is not None
+                return [
+                    AlignmentResult(score=0.5, start=0, end=2, match=lower_match)
+                ]
+            return []
+
+    lexicon = IPALexicon()
+    lexicon.converter = DummyConverter()
+    lexicon.entries = {
+        "号halo": replacement_entry,
+        "你好": lower_entry,
+    }
+
+    corrector = ASRCorrector(lexicon, aligner=DummyAligner(), score_threshold=0.4)
+
+    candidates = corrector.candidate_replacements("你好 hello world")
+
+    assert [candidate.score for candidate in candidates] == [0.9, 0.5]
+    assert candidates[0].start == 1 and candidates[0].end == 8
+    assert candidates[1].start == 0 and candidates[1].end == 2
 
 
 def test_asr_corrector_respects_score_threshold(monkeypatch):
